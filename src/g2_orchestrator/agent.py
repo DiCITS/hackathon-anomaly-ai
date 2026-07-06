@@ -19,14 +19,15 @@ class StrategyOrchestrator:
 
         print("connection stablished with vLLM")
 
-        ruta_archivo = "moc_rag.txt" # Reemplaza con la ruta de tu archivo
+        ruta_archivo = "src\g2_orchestrator\mock\mock_rag.txt" # Reemplaza con la ruta de tu archivo
+        
         with open(ruta_archivo, "r", encoding="utf-8") as archivo:
             paper_content = archivo.read()
         
         response = client.chat.completions.create(
             model="google/gemma-4-31B-it",
             messages=[
-                {"role": "system", "content": "Eres un agente inteligente"},
+                {"role": "system", "content": "Eres un agente inteligente experto en detección de anomalías en series temporales"},
                 {"role": "user", "content": get_main_prompt(paper_content)}
             ],
             temperature=0.7,

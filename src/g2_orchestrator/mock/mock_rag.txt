@@ -1,0 +1,241 @@
+\section{Proposed Algorithm}
+\label{algorithm}
+
+
+Our unsupervised DWTt-test algorithm (Alg. \ref{alg:dwtt-test}) exploits the Discrete Wavelet Transform (DWT) and an ad-hoc $t$-test for anomaly detection in univariate time series.
+
+\subsection{Wavelet Transform}
+\begin{figure*}
+    \centering
+\includegraphics[width=0.80\textwidth]{wavelet.pdf}
+    \caption{Multi-level Haar Wavelet decomposition ($\hat{L}=3$) of a representative signal from the NAB dataset collection. The top panel illustrates the original univariate time series. The subsequent rows display the iterative decomposition process: The left column shows the approximation or coarse coefficients, which capture the low-frequency trend, while the right column isolates the high-frequency detail coefficients, which are highly responsive to abrupt changes and anomalous behaviours. Note the progressive downsampling of the coefficient index at each decomposition level.}
+    \label{fig:wavelet}
+\end{figure*}
+Wavelet transforms \cite{meyer1992wavelets} enable the representation of time series signals through the corresponding extracted information. Unlike (short-time) Fourier transforms, which are hampered by a constant trade-off between frequency and time resolution, wavelet transforms excel at extracting precise, time-localised frequency data. This process involves two primary operations on a "mother wavelet": Scaling (compressing or expanding the wave) and shifting (moving it along the time axis). The transform is then computed by taking the scalar product of these modified wavelets and the original signal. The Discrete Wavelet Transform (DWT) is the result of sampling the wavelets at discrete intervals. Crucially, the DWT decomposes the signal into two distinct components: The \textit{coarse} (or approximation) component, which captures the underlying low-frequency trend, and the \textit{detail} component, which isolates high-frequency, localised variations (see Figure \ref{fig:wavelet}). The DWT is highly favoured in practical applications due to its linear computational efficiency. Specifically, the current version of DWTt-test utilises a decimating DWT based on Haar wavelets for signal analysis.
+
+Since our algorithm is based on DWT, time series must have a length equal to a power of two to work properly. Imposing this constraint on the time series is not an issue, owing to the fact that it is always possible to artificially increase the length of the time series (a padding operation) for instance by copying the last segment of the original time series. Obviously, when the model is run, only the anomaly scores of the original time series are considered. Hence, given a time series \(\mathbf{x} \in \mathbb{R}^N\), a pre-processing step is required to increase the size of the signal to length \( M=2^{\lceil \text{log}_2(N) \rceil} \). The Haar wavelet transform can compute up to \(L = \text{log}_2(M)\) levels of detail and coarse coefficients. We denote the detail coefficients as \(d_{k,l}\) and the coarse coefficients as \(c_{k,l}\) where \(k\) is the time index and \(l\) is the wavelet's level. Specifically, level \(l = 0\) has only detail coefficients and this level is equivalent to the original time series of length \(M\), while the level \(L\) has detail and coarse coefficients of length one. In general, the size of the time series at level \(l\) is equal to \( \frac{M}{2^l} \). DWTt-test uses both the detail and coarse coefficients in addition to the original signal at level \(l=0\). 
+Even though the number of possible levels is \(L\), the use of all these levels is not strictly required. Hence, for our algorithm \(\hat{L}\) is a hyper-parameter and is usually chosen as \(1 \leq \hat{L} \leq L\). All the subsequent operations are performed starting from the highest level \(l=\hat{L}\) down to the level \(l=0\).
+
+\subsection{Sliding Windows}
+The proposed algorithm aims to detect outliers across the DWT levels. Even though the DWT is able to compress temporal information across levels, it is important to analyse these levels locally by using sliding windows to catch the local behaviour of the time series. For each DWT level \( l \in {1,2,...,\hat{L}}\), given a window of length \(w\) and a stride equal to one (maximum overlapping), the algorithm rearranges the windows into two matrices \(\mathbf{D}
+_{l}, \mathbf{C}_{l} \in \mathbb{R}^{q_l \times w_l}\)  for detail and coarse coefficients respectively, where \(q_l = \frac{M}{2^l} - w_l +1\) is the number of windows. Next, the average of each row of the matrices is computed, leading to two new vectors \(\mathbf{d}^\text{avg}_{l},\mathbf{c}^\text{avg}_l\in \mathbb{R}^{q_l}\). In the final part of the algorithm, level \(l=0\) is also used. Taking into account that level \(l=0\) has only detail coefficients, all the previous operations are performed on the detail matrix only. Since the size of the time series varies across levels, the algorithm adapts the dimension of the window during iterations. In particular, the window size adjustment is performed as \(w_l = w(\hat{L}-l+1)\) where \(l \in {\hat{L},\hat{L}-1,..., 0}\), hence setting \(w_{\hat{L}} = w\) and \(w_{0} = w (\hat{L}+1)\). 
+
+\subsection{$t$-Test Detection}
+After the computation of the \(\mathbf{d}^\text{avg}_{l},\mathbf{c}^\text{avg}_l\) vectors and by choosing an appropriate value of \(w\), each element  \({d}^\text{avg}_{i,l}, {c}^\text{avg}_{i,l}\) with \(i\in {1,2,...,q_l}\) can be approximately considered as a sample from a Gaussian random variable thanks to the central limit theorem.
+Starting from this assumption, the idea is to compute the \textit{t}-score of each element \({d}^\text{avg}_{i,l}, {c}^\text{avg}_{i,l}\) using the following formulas: 
+
+\begin{align}
+    t^d_{i,l,q_l-1} &= \frac{d^\text{avg}_{i,l} - \mu^d}{S_l^d}, & 
+    t^c_{i,l,q_l-1} &= \frac{c^\text{avg}_{i,l} - \mu^c}{S_l^c},
+    \label{eq:tscores}
+\end{align}
+
+where $t^d_{i,l,q_l-1}$ and $t^c_{i,l,q_l-1}$ are the $t$-scores for the $i$-th element of the $\mathbf{d}^\text{avg}_{l}$ and $\mathbf{c}^\text{avg}_{l}$ vectors, respectively. These scores follow a Student's $t$-distribution with $q_l-1$ degrees of freedom. The parameters $\mu^d$ and $\mu^c$ represent the population means, which are considered equal to $0$ after the standardisation of the time series. The sample variances, $(S_l^d)^2$ and $(S_l^c)^2$, are computed as follows:
+
+\begin{align*}
+    (S_l^d)^2 &= \frac{1}{q_l - 1} \sum_{i=1}^{q_l} (d^\text{avg}_{i,l} - \bar{d}^\text{avg}_{l})^2, \\
+    (S_l^c)^2 &= \frac{1}{q_l - 1} \sum_{i=1}^{q_l} (c^\text{avg}_{i,l} - \bar{c}^\text{avg}_{l})^2
+\end{align*}
+
+where $\bar{d}^\text{avg}_{l}$ is the average of the $\mathbf{d}^\text{avg}_{l}$ vector, and $\bar{c}^\text{avg}_{l}$ is the average of the $\mathbf{c}^\text{avg}_{l}$ vector. %To simplify the notation for both coarse and detail \textit{t}-scores, we omit the superscripts and use \(t_{i,l,q-1}\) to denote the \(i\)-th \textit{t}-score and \(\mathbf{t}_{l,q-1}\) for its vector form. This unified notation is adopted because the operations are applied identically to both components.
+Once the \textit{t}-scores are computed, it is possible to exploit the \(\mathbf{t}^d_{l,q_l-1}, \mathbf{t}^c_{l,q_l-1}\) vectors to determine the outliers for level \(l\) by setting a significance value \(\epsilon \). In particular, the algorithm employs a two-tailed test to evaluate the statistical significance of the coefficients. Following standard probability notation let $t^d \sim t(q_l-1)$ and $t^c \sim t(q_l-1)$ represent the random variables following a Student's $t$-distribution with $q_l-1$ degrees of freedom. The algorithm considers the $i$-th element an outlier if its specific observed $t$-scores, $t^d_{i,l,q_l-1}$ and $t^c_{i,l,q_l-1}$, yield a $p$-value lower than the predefined significance thresholds, satisfying the conditions:
+
+\[ \mathbb{P}(t^d > |t^d_{i,l,q_l-1}|) \cdot 2 < \epsilon, \]
+
+and
+
+\[ \mathbb{P}(t^c > |t^c_{i,l,q_l-1}|) \cdot 2 < \epsilon. \] This process generates two outlier vectors $\mathbf{o}^d_{l}, \mathbf{o}^c_{l} \in \mathbb{R}^{q_l} $, whose elements are defined as:
+
+\begin{center}
+\begin{minipage}{0.45\textwidth}
+\[
+o^d_{i,l} = 
+\begin{cases} 
+1 & \text{if } \mathbb{P}(t^d > |t^d_{i,l,q_l-1}|) \cdot 2 > \epsilon \\
+0 & \text{otherwise}
+\end{cases},
+\]
+\end{minipage}
+\hfill
+\begin{minipage}{0.45\textwidth}
+\[
+o^c_{i,l} = 
+\begin{cases} 
+1 & \text{if } \mathbb{P}(t^c > |t^c_{i,l,q_l-1}|) \cdot 2 > \epsilon \\
+0 & \text{otherwise}
+\end{cases},
+\]
+\end{minipage}
+\end{center}
+
+and a unique outlier vector is computed as \(\mathbf{o}_{l} = \mathbf{o}^d_l + \mathbf{o}^c_l\). When the current level is \(l=0\), all the previous operations are performed only on the detail components due to the absence of coarse decomposition.
+Since our background assumptions are different from the standard statistical $t$-test, we prove that the Equation \eqref{eq:tscores} is correct. In particular, the statistical analysis available in Section \ref{formal_detivation_ttest} derives the ad-hoc $t$-score formula that follows a Student's $t$-distribution with \(q_l-1\) degrees of freedom. 
+
+\subsection{Outlier Tree}
+
+
+The outlier vector \(\mathbf{o}_{l}\) contains information about the positions of the outliers at level \(l\). Since the length of the vector depends on the size of the window, the outlier positions can be extracted by building a tree as shown in Algorithm \ref{alg:build_tree}. 
+
+The core logic of the latter is based on the assumption that windows containing outliers contribute more significantly to the cumulative sum during the construction of the tree (see Figure \ref{fig:tree}). In terms of notation, the slice operator $[a : b]$ follows the convention of being inclusive of the starting index $a$ and exclusive of the ending index $b$. At each iteration, the algorithm generates a vector $\mathbf{z}$ representing the tree at a specific decomposition level $l$. The dimension of $\mathbf{z}$ is dynamically adjusted to match the signal length at that stage, namely $\frac{M}{2^l}$, ensuring that outliers can be mapped back to their original positions within that specific temporal resolution.
+
+To maintain computational efficiency and minimise memory overhead, the algorithm does not store all decomposition levels simultaneously. Instead, it proceeds iteratively by maintaining only the current-level tree $\mathbf{z}$ and the previous-level tree $\mathbf{z}_{p}$. If the current level $l$ satisfies the condition $0 \leq l < \hat{L}$, the algorithm propagates the anomaly information from the coarser level to the finer one. Specifically, for each point in the previous tree $\mathbf{z}_{p}$ with a non-zero score, the value is projected onto its corresponding children in the current vector $\mathbf{z}$. 
+
+By combining local insights across all $\hat{L}$ levels, the final output is an $M$-dimensional vector that exhibits peaks at the detected outlier locations (as illustrated in Figure \ref{fig:dwtt-test_scores}). 
+
+Once the final outlier scores are computed, various thresholding or clustering techniques could be applied to isolate the anomalies. However, we deliberately avoid any further post-processing of the output scores. This choice is made to ensure a fair and transparent comparison with competing algorithms, utilising a ROC-based metrics that relies exclusively on the raw model output (further details are provided in Section \ref{results}).
+
+
+\subsection{Formal derivation of the $t$-test}
+\label{formal_detivation_ttest}
+
+In this section, we present the formal derivation of the $t$-score, specifically tailored for the analysis of our algorithm. 
+It is crucial to recognise that the classical Student's $t$-test is built upon a specific set of theoretical assumptions that are often violated in time series. Specifically, the standard derivation assumes that:
+
+\begin{itemize}
+    \item observations are independent and identically distributed (i.i.d.), such that $Cov(x_i, x_j) = 0$ for all $i \neq j$;
+    \item the underlying population follows a normal distribution, $x_i \sim \mathcal{N}(\mu, \sigma^2)$;
+    \item the parameters $\mu$ and $\sigma^2$ remain constant throughout the sampling process.
+\end{itemize}
+
+In the context of our algorithm, the resulting time series does not necessarily satisfy these conditions. Temporal dependencies, auto-correlation, or non-Gaussian noise distributions means that applying the classic $t$-test formula directly would yield biased results and unreliable $p$-values. 
+Therefore, we show how to adapt the $t$-score computation to account for these characteristics, ensuring that the derived statistic maintains its theoretical properties and provides a valid measure of significance under non-ideal conditions.
+
+The derivation of a robust $t$-score formula relies on specific foundational assumptions. 
+In particular, we assume that the observations of the original time series $x_i$ are 
+independent and identically distributed (see Figure \ref{fig:wavelet_tscore}). 
+While these assumptions simplify the inherent dependency of some time series, 
+they represent a well-established standard in practical applications and exhibit 
+remarkable reliability for outlier detection. To develop our ad-hoc $t$-score, 
+we first formalise the requisite statistical framework.
+
+
+\begin{definition}[Random Sample]
+\label{def:random_sample}
+Let $X = \{X_1, X_2, \dots, X_n\}$ be a set of $n$ independent and identically distributed (i.i.d.) random variables representing a univariate time series, such that $X_i \sim \mathcal{D}(\mu, \sigma^2)$, where $\mu$ is the population mean and $\sigma^2 < \infty$ is the population variance.
+\end{definition}
+
+\begin{definition}[Sample Statistics]
+\label{def:sample_stats}
+The Sample Mean $\bar{X}_n$ is defined as:
+\[ \bar{X}_n = \frac{1}{n} \sum_{i=1}^{n} X_i. \]
+The Sample Standard Deviation $S_n$ is defined using the unbiased sample variance:
+\[ S_n = \sqrt{\frac{1}{n-1} \sum_{i=1}^{n} (X_i - \bar{X}_n)^2}. \]
+\end{definition}
+
+\begin{definition}[Sample Z-score and Studentisation]
+\label{def:zscore}
+Let $X = \{X_1, \dots, X_n\}$ be a random sample as defined in Definition \ref{def:random_sample}. We distinguish between two forms of score transformations:
+\begin{enumerate}
+    \item Population Z-score: If the population parameters $\mu$ and $\sigma$ are known, the Z-score for an observation $x_i$ is:
+    \[ z_i = \frac{x_i - \mu}{\sigma}. \]
+    \item Sample Z-score (Studentised score): If $\sigma$ or $\mu$ are unknown, they are replaced by the sample standard deviation $S_n$ and by the sample mean $\bar{X}_n$. In this case the transformation is termed \textit{studentisation}:
+    \[ t_i = \frac{x_i - \bar{X}_n}{S_n}. \]
+\end{enumerate}
+\end{definition}
+
+\begin{definition}[Chi-squared Distribution]
+\label{def:chi_squared}
+Let $Z_1, Z_2, \dots, Z_N$ be i.i.d. random variables such that $Z_i \sim \mathcal{N}(0, 1)$ for all $i = 1, \dots, N$. The random variable $K$ defined as:
+\[ K = \sum_{i=1}^{N} Z_i^2, \]
+follows a Chi-squared distribution with $N$ degrees of freedom, denoted as $K \sim \chi^2(N)$.
+\end{definition}
+
+\begin{definition}[$t$-Student Distribution]
+\label{def:t_student}
+Let $Z$ and $K$ be two independent random variables such that $Z \sim \mathcal{N}(0, 1)$ and $K \sim \chi^2(N)$. The random variable $T$ defined by the ratio:
+\[ T = \frac{Z}{\sqrt{K/N}}, \]
+follows a $t$-Student distribution with $N$ degrees of freedom, denoted as $T \sim t(N)$.
+\end{definition}
+
+\begin{theorem}[Central Limit Theorem]
+\label{theo:clt}
+Let $X_1, X_2, \dots, X_n$ be i.i.d. random variables from an arbitrary distribution $\mathcal{D}$ with mean $\mu$ and finite variance $\sigma^2$. As $n \to \infty$, the distribution of the standardised sample mean converges to the standard normal distribution:
+\[ Z_n = \frac{\bar{X}_n - \mu}{\sigma / \sqrt{n}} \xrightarrow{d} \mathcal{N}(0, 1). \]
+This implies that for large $n$, the sample mean is approximately distributed as $\bar{X}_n \sim \mathcal{N}(\mu, \frac{\sigma^2}{n})$.
+\end{theorem}
+
+\begin{theorem}[Convergence with Estimated Variance]
+\label{theo:convergence}
+In the context of the Central Limit Theorem (Theorem \ref{theo:clt}), if the population variance $\sigma^2$ is unknown and replaced by the unbiased sample variance $S_n^2$, the standardised statistic still converges in distribution to the standard normal distribution as $n \to \infty$ by Slutsky's Theorem:
+
+\[ \frac{\bar{X}_n - \mu}{S_n / \sqrt{n}} \xrightarrow{d} \mathcal{N}(0, 1). \]
+
+Furthermore, if the underlying random sample is drawn from a strictly Normal distribution ($X_i \sim \mathcal{N}(\mu, \sigma^2)$), this statistic follows an exact $t$-Student distribution with $n-1$ degrees of freedom for any sample size $n$:
+\[ \frac{\bar{X}_n - \mu}{S_n / \sqrt{n}} \sim t(n-1). \]
+\end{theorem}
+
+Starting from these theoretical premises, and fixing the DWT level to $l=0$, we can explicitly compute the correct $t$-score for the proposed algorithm. We report here only the derivation for level $l=0$ since at this scale only details are available, streamlining the notation. Naturally, the analytical process remains identical for all other levels and for the coarse coefficients as well.
+
+Given a time series formulated as in Definition \ref{def:random_sample} and an appropriate window size $w$, the first step of the DWTt-test is to compute the detail matrix $\mathbf{D}\in \mathbb{R}^{(M-w+1) \times w}$. To simplify the notation, let $q = M-w+1$. Next, the average of each row is computed, yielding the vector $\mathbf{d}^\text{avg} = \{d^\text{avg}_1, d^\text{avg}_2, \dots, d^\text{avg}_q \}$. According to Theorem \ref{theo:clt}, the distribution of each element can be approximated as $d^\text{avg}_i \sim \mathcal{N}(\mu,\frac{\sigma^2}{w})$. 
+
+Relying on this normality property, we can compute the sample standard deviation $S_q$ of the vector $\mathbf{d}^\text{avg}$ following Definition \ref{def:sample_stats}. Then, following the first case of Definition \ref{def:zscore}, the population Z-score for the $i$-th element is defined as:
+\[ Z_i = \frac{d^\text{avg}_i - \mu}{\sigma / \sqrt{w}}. \]
+Since each $d^\text{avg}_i \sim \mathcal{N}\left(\mu, \frac{\sigma^2}{w}\right)$, it trivially follows that the standardised variable is distributed as a standard normal, i.e., $Z_i \sim \mathcal{N}(0, 1)$.
+
+To fulfill the requirements of the Student's $t$-distribution as stated in Definition \ref{def:t_student}, we must identify a random variable $K$ that follows a Chi-squared distribution (Definition \ref{def:chi_squared}). Let us analyse the sum of the squared standardised deviations of our details vector:
+
+\[ \sum_{j=1}^{q} \frac{(d^\text{avg}_j - \mu)^2}{\sigma^2/w} \sim \chi^2(q). \]
+
+This relationship perfectly aligns with Definition \eqref{def:chi_squared} because each term inside the sum is a squared standard normal variable, $\left(\mathcal{N}(0,1)\right)^2 \sim \chi^2(1)$. By partitioning this sum of squares, we can rewrite the equation as:
+
+\[ \underbrace{\sum_{j=1}^{q} \frac{(d^\text{avg}_j - \mu)^2}{\sigma^2/w}}_{\sim \chi^2(q)} = \underbrace{\frac{(q-1)S_q^2 w}{\sigma^2}}_{K} + \underbrace{\frac{q(\bar{d}^\text{avg} - \mu)^2 w}{\sigma^2}}_{\sim \chi^2(1)}, \]
+
+where $S_q^2$ is the sample variance of $\mathbf{d}^\text{avg}$ and $\bar{d}^\text{avg}$ is its sample mean. Note that $\bar{d}^\text{avg} = \frac{1}{q} \sum_{j=1}^q d^\text{avg}_j \sim \mathcal{N}\left(\mu, \frac{\sigma^2}{w \cdot q}\right)$.
+
+Since the left-hand side follows a $\chi^2(q)$ distribution and the rightmost term follows a $\chi^2(1)$ distribution, the remaining term directly yields our variable $K$:
+
+\[ K = \frac{w(q-1)S_q^2}{\sigma^2} \sim \chi^2(q-1). \]
+
+Now we can derive a valid $t$-score. According to Definition \ref{def:t_student}, the $t$-statistic with $q-1$ degrees of freedom is constructed via the ratio of the standard normal variable $Z_i$ and $\sqrt{K/(q-1)}$. For a single observation $d^\text{avg}_i$, substituting our derived $Z_i$ and $K$, the studentised score (consistent with Definition \ref{def:zscore}, case 2) evaluates to:
+
+\begin{equation}
+t_{q-1} = \frac{d^\text{avg}_i - \mu}{S_q}.
+\end{equation}
+
+Remarkably, the resulting formulation is algebraically independent of the window size $w$. To formally prove that this specific equation correctly yields a Student's $t$-distribution, we expand the denominator by multiplying and dividing by the necessary variance components:
+
+\begin{equation}
+\begin{split}
+t_{q-1} &= \frac{d^\text{avg}_i - \mu}{\sqrt{S_q^2}} \\
+&= \frac{d^\text{avg}_i - \mu}{\sqrt{S_q^2 \frac{(\sigma^2/w)(q-1)}{(\sigma^2/w)(q-1)}}} \\
+&= \frac{d^\text{avg}_i - \mu}{\sqrt{\frac{\sigma^2}{w}} \cdot \sqrt{\frac{w(q-1)S_q^2}{\sigma^2}} \cdot \sqrt{\frac{1}{q-1}}} \\
+&= \frac{\frac{d^\text{avg}_i - \mu}{\sigma/\sqrt{w}}}{\sqrt{\frac{\frac{w(q-1)S_q^2}{\sigma^2}}{q-1}}} \\
+&= \frac{Z_i}{\sqrt{K / (q-1)}}
+\end{split}
+\end{equation}
+
+This concludes the proof. In accordance with Theorem \ref{theo:convergence} we have proved that, despite the initial variance scaling induced by the parameter $w$, the derived statistic satisfies the theoretical requirements (Definition \ref{def:t_student}) and guarantees an exact Student's $t$-distribution, $t_{q-1} \sim t(q-1)$.
+
+\subsection{Computational Complexity Analysis}
+\label{sec:complexity}
+
+In this section, we analyse the computational complexity of the proposed DWTt-test algorithm (Algorithm 1). Let $N$ be the dimension of the input time series $\mathbf{x}$. The algorithm first pads the input to the next power of two, $M = 2^{\lceil \log_2(N) \rceil}$. Since $M < 2N$, we have that $M = \mathcal{O}(N)$. We evaluate the complexity by analysing the main algorithmic steps.
+
+\begin{enumerate}
+    \item DWT: Computing the Haar wavelet transform up to a maximum level $\hat{L}$ requires processing signals of halving sizes at each step. The size of the detail and approximation coefficients at level $l$ is $\frac{M}{2^l}$. The total number of operations for the DWT across all $\hat{L}$ levels is bounded by the geometric series:
+    \[ \sum_{l=1}^{\hat{L}} \mathcal{O}\left(\frac{M}{2^l}\right) = \mathcal{O}\left( M \sum_{l=1}^{\hat{L}} \frac{1}{2^l} \right) \le \mathcal{O}(M) = \mathcal{O}(N). \]
+    Thus, the wavelet decomposition takes strictly linear time.
+
+    \item Sliding Window and Statistics Computation: At each level $l \in [1, \hat{L}]$, a sliding window of size $w_l = w(\hat{L} - l + 1)$ is applied. The length of the signal at level $l$ is $\frac{M}{2^l}$, meaning the number of windows generated at this level is $q_l = \frac{M}{2^l} - w_l + 1$. 
+    
+    To determine the overall complexity, we sum the number of windows across all $\hat{L}$ levels. Notice that the window size $w_l$ scales linearly. By substituting $j = \hat{L} - l + 1$, the sum of the window sizes becomes an arithmetic progression:
+    
+    \begin{equation}
+    \begin{split}
+    \sum_{l=1}^{\hat{L}} q_l &= \sum_{l=1}^{\hat{L}} \left( \frac{M}{2^l} - w(\hat{L} - l + 1) + 1 \right) \\
+    &= \sum_{l=1}^{\hat{L}} \frac{M}{2^l} - w \sum_{j=1}^{\hat{L}} j + \sum_{l=1}^{\hat{L}} 1 \\
+    &\le M - w \frac{\hat{L}(\hat{L}+1)}{2} + \hat{L}.
+    \end{split}
+    \end{equation}
+    
+    Since $\hat{L}$ (the maximum decomposition level, typically 3 or 4) and the base window parameter $w$ are empirically chosen constants independent of $N$, the terms involving them evaluate to $\mathcal{O}(1)$ with respect to the input size. Therefore, the total number of windows processed across the entire hierarchy is $\mathcal{O}(M) - \mathcal{O}(\hat{L}^2) + \mathcal{O}(\hat{L}) = \mathcal{O}(N)$. 
+    
+    The computation of the sample mean and variance for each window can be optimised to $\mathcal{O}(1)$ per window using cumulative sums, or at worst $\mathcal{O}(w \hat{L})$ naively. Since $w \hat{L}$ is a small constant, the overall sliding window processing time remains $\mathcal{O}(N)$.
+
+    \item Score Evaluation and Tree Building: For each of the $\mathcal{O}(N)$ total windows, computing the $t$-score, evaluating the $p$-value against the threshold $\epsilon$, and checking the anomaly condition requires a constant $\mathcal{O}(1)$ number of operations. Consequently, the scoring mechanism takes $\mathcal{O}(N)$ time. Similarly, updating the hierarchical anomaly tree requires processing elements progressively up the levels, which can be stated again as the geometric sum $\sum \frac{M}{2^l} \le M$, bounding the tree operations to $\mathcal{O}(N)$.
+
+    \item DWT $l=0$ Analysis: Finally, the algorithm performs a similar sliding window pass over the original padded series of size $M$ (level $l=0$). This generates $M - w + 1$ windows. Processing these windows and assigning the final scores takes $\mathcal{O}(M) = \mathcal{O}(N)$ time.
+\end{enumerate}
+
+Summing the linear complexities of the individual stages, the overall time complexity of the DWTt-test algorithm is strictly \textbf{$\mathcal{O}(N)$}. This linear scalability guarantees extreme efficiency, making the algorithm highly suitable for real-time anomaly detection in large univariate time series.
+\label{computational_complexity}
