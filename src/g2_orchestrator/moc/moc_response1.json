@@ -1,0 +1,54 @@
+{
+  "tipo_anomalia": "Anomalías en series temporales univariadas (detección de outliers locales y tendencias)",
+  "algoritmo_recomendado": {
+    "funcion": "DWTt_test",
+    "parametros": [
+      "x",
+      "w",
+      "L_hat",
+      "epsilon"
+    ],
+    "bloque": [
+      {
+        "instruccion": "preprocesar",
+        "variable": "M",
+        "valor": "Calcular la siguiente potencia de 2 mayor o igual a longitud(x) y aplicar padding a x para alcanzar tamaño M"
+      },
+      {
+        "instruccion": "transformar",
+        "variable": "DWT_coeffs",
+        "valor": "Aplicar Transformada Wavelet Discreta (Haar) hasta el nivel L_hat para obtener coeficientes de detalle (d) y aproximación (c)"
+      },
+      {
+        "instruccion": "iterar",
+        "variable": "l",
+        "valor": "Desde l = L_hat hasta l = 0"
+      },
+      {
+        "instruccion": "ventana_deslizante",
+        "variable": "vectores_avg",
+        "valor": "Para el nivel l, definir tamaño de ventana w_l = w * (L_hat - l + 1). Calcular el promedio de cada ventana para coeficientes de detalle (d_avg) y aproximación (c_avg)"
+      },
+      {
+        "instruccion": "calcular_t_scores",
+        "variable": "t_scores",
+        "valor": "Para cada elemento en d_avg y c_avg, calcular el t-score: (valor - 0) / desviación_estándar_de_la_muestra"
+      },
+      {
+        "instruccion": "detectar_outliers",
+        "variable": "o_l",
+        "valor": "Asignar 1 si el p-valor del t-score (prueba de dos colas) es menor que epsilon, sino 0. Sumar vectores de outliers de detalle y aproximación para obtener el vector de outliers del nivel l"
+      },
+      {
+        "instruccion": "construir_arbol",
+        "variable": "z",
+        "valor": "Propagar la información de anomalías desde el nivel más grueso (L_hat) hacia el más fino (0), proyectando los scores de los padres a sus hijos"
+      },
+      {
+        "instruccion": "retornar",
+        "valor": "Vector final z de dimensión M con los picos de anomalías detectadas"
+      }
+    ]
+  },
+  "justificacion_cientifica": "El algoritmo combina la Transformada Wavelet Discreta (DWT) para descomponer la señal en diferentes resoluciones temporales y frecuencias, permitiendo capturar tanto cambios abruptos (detalles) como tendencias (aproximaciones). Utiliza el Teorema del Límite Central para justificar que los promedios de ventanas deslizantes se distribuyen normalmente, permitiendo el uso de una prueba t de Student ad-hoc para identificar valores estadísticamente significativos (outliers) con una complejidad computacional lineal O(N)."
+}
